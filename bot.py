@@ -12,7 +12,8 @@ from telegram.ext import (
     filters
 )
 
-from ai_agent import analyze_meeting
+from ai_agent import analyze_meeting, extract_tasks
+from sheets import save_tasks
 
 load_dotenv()
 
@@ -71,6 +72,23 @@ async def handle_message(update: Update, _context: ContextTypes.DEFAULT_TYPE):
         result = await asyncio.to_thread(
             analyze_meeting,
             transcript
+        )
+
+        data = await asyncio.to_thread(
+            extract_tasks,
+            transcript
+        )
+
+        saved_count = await asyncio.to_thread(
+            save_tasks,
+            data["tasks"],
+            data["summary"]
+        )
+
+        result += "\n\n📊 GOOGLE SHEETS\n"
+        result += (
+            f"✅ {saved_count} task(s) saved to "
+            "your Meeting Action Tracker."
         )
 
         if not result:
