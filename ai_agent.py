@@ -1,7 +1,8 @@
 import json
 import os
+from datetime import date
 from pathlib import Path
-from typing import Protocol, TypedDict, cast
+from typing import Optional, Protocol, TypedDict, cast
 
 from dotenv import load_dotenv
 from google import genai
@@ -26,7 +27,7 @@ client = genai.Client(api_key=api_key)
 
 
 class _Response(Protocol):
-    text: str | None
+    text: Optional[str]
 
 
 class _Models(Protocol):
@@ -197,7 +198,10 @@ def extract_tasks(transcript: str) -> ExtractedMeeting:
     )
 
 
-def analyze_meeting_once(transcript: str) -> ExtractedMeeting:
+def analyze_meeting_once(
+    transcript: str,
+    meeting_date: str,
+) -> ExtractedMeeting:
 
     prompt = f"""
     You are an expert AI meeting assistant.
@@ -225,13 +229,25 @@ def analyze_meeting_once(transcript: str) -> ExtractedMeeting:
         ]
     }}
 
-    Rules:
+
+Rules:
     - Meeting name should be 3 to 8 words.
     - Never invent names, tasks or deadlines.
     - Use "Not specified" for missing owners or deadlines.
     - Return empty lists if there are no decisions,
       recommendations or action items.
     - Keep the summary concise.
+
+DEADLINE RULES:
+    - The meeting date is: {meeting_date}
+    - Interpret relative deadlines using this meeting date.
+    - Convert "Friday", "next Monday", "tomorrow",
+      and similar expressions into actual calendar dates.
+    - Return every known deadline strictly as YYYY-MM-DD.
+    - For a deadline without enough information,
+      return "Not specified".
+    - Never guess or invent a deadline date.
+
 
     Meeting transcript:
     {transcript}
@@ -264,11 +280,23 @@ def analyze_meeting_once(transcript: str) -> ExtractedMeeting:
 
         task_data = cast(dict[str, object], item)
 
+        raw_deadline = str(
+            task_data.get("deadline", "Not specified")
+        ).strip()
+
+        try:
+            if raw_deadline.lower() == "not specified":
+                deadline = "Not specified"
+            else:
+                deadline = date.fromisoformat(raw_deadline).isoformat()
+        except ValueError:
+            deadline = "Not specified"
+
         tasks.append({
             "task": str(task_data.get("task", "")),
             "owner": str(task_data.get("owner", "Not specified")),
-            "deadline": str(task_data.get("deadline", "Not specified")),
-            "status": str(task_data.get("status", "Pending")),
+            "deadline": deadline,
+            "status": "Pending",
         })
 
     def get_string_list(key: str) -> list[str]:
@@ -291,4 +319,3 @@ def analyze_meeting_once(transcript: str) -> ExtractedMeeting:
         recommendations=get_string_list("recommendations"),
         tasks=tasks,
     )
-

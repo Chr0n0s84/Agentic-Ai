@@ -1,11 +1,9 @@
-
-
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from collections.abc import Iterable, Mapping
-from typing import cast
+from typing import Optional, TypedDict, cast
 
 import gspread
 from dotenv import load_dotenv
@@ -36,6 +34,14 @@ MEETING_HEADERS = [
     "Summary",
     "Transcript",
 ]
+
+
+class TaskRecord(TypedDict):
+    row: int
+    task: str
+    owner: str
+    deadline: str
+    status: str
 
 
 def get_spreadsheet() -> gspread.Spreadsheet:
@@ -99,7 +105,7 @@ def save_meeting(
     tasks: Iterable[object],
     summary: str,
     transcript: str,
-) -> int | None:
+) -> Optional[int]:
 
     spreadsheet = get_spreadsheet()
 
@@ -187,3 +193,110 @@ def meeting_exists(transcript: str) -> bool:
 
     return meeting_id in existing_ids
 
+
+def get_all_tasks() -> list[TaskRecord]:
+    """Return tasks with their actual Google Sheets row numbers."""
+    worksheet = get_worksheet()
+    records = worksheet.get_all_records()
+
+    # Remove extra spaces from column headers
+    records = [
+        {
+            str(key).strip(): value
+            for key, value in record.items()
+        }
+        for record in records
+    ]
+    print("SHEET RECORDS:", records)
+    print("SHEET HEADERS:", list(records[0].keys()) if records else "No records")
+
+    tasks: list[TaskRecord] = []
+
+    for row_number, record in enumerate(records, start=2):
+        tasks.append({
+            "row": row_number,
+            "task": str(record.get("Task", "")),
+            "owner": str(record.get("Owner", "")),
+            "deadline": str(record.get("Deadline", "")),
+            "status": str(record.get("Status", "Pending")),
+        })
+
+    return tasks
+
+
+def update_task_status(row_number: int, status: str):
+    """Update the status of a task in Google Sheets."""
+
+    allowed_statuses = ["Pending", "In Progress", "Completed"]
+
+    if status not in allowed_statuses:
+        raise ValueError("Invalid task status")
+
+    if row_number < 2:
+        raise ValueError("Invalid task row number")
+
+    worksheet = get_worksheet()
+
+    if row_number > worksheet.row_count:
+        raise ValueError("Task not found")
+
+    task_name = worksheet.cell(row_number, 1).value
+
+    if not task_name:
+        raise ValueError("Task not found")
+
+    worksheet.update_cell(row_number, 4, status)
+
+    return task_name
+
+
+def parse_deadline(deadline: str) -> Optional[date]:
+    """Convert a deadline string into a date."""
+    deadline = deadline.strip()
+
+    if not deadline or deadline.lower() in {
+        "not specified", "none", "n/a"
+    }:
+        return None
+
+    try:
+        return date.fromisoformat(deadline)
+    except ValueError:
+        return None
+
+
+def get_deadline_tasks() -> dict[str, list[TaskRecord]]:
+    """Return upcoming, overdue and undated pending tasks."""
+    tasks = get_all_tasks()
+    today = date.today()
+
+    upcoming: list[TaskRecord] = []
+    overdue: list[TaskRecord] = []
+    undated: list[TaskRecord] = []
+
+    for task in tasks:
+        if task["status"].strip().lower() == "completed":
+            continue
+
+        deadline_date = parse_deadline(task["deadline"])
+
+        if deadline_date is None:
+            undated.append(task)
+        elif deadline_date < today:
+            overdue.append(task)
+        else:
+            upcoming.append(task)
+
+    upcoming.sort(
+        key=lambda task: parse_deadline(task["deadline"]) or date.max
+    )
+
+    overdue.sort(
+        key=lambda task: parse_deadline(task["deadline"]) or date.max
+    )
+
+    return {
+        "upcoming": upcoming,
+        "overdue": overdue,
+        "undated": undated,
+    }
