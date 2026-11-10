@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional, Protocol, TypedDict, cast
 from google.genai import types
@@ -281,6 +281,41 @@ def extract_tasks(transcript: str) -> ExtractedMeeting:
         tasks=tasks
     )
 
+def calculate_deadline(deadline_text: str, meeting_date: str) -> str:
+    text = deadline_text.strip().lower()
+
+    if not text or text == "not specified":
+        return "Not specified"
+
+    base_date = date.fromisoformat(meeting_date)
+
+    if text == "tomorrow":
+        return (base_date + timedelta(days=1)).isoformat()
+
+    weekdays = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }
+
+    for day_name, day_number in weekdays.items():
+        if day_name in text:
+            days_ahead = (day_number - base_date.weekday()) % 7
+
+            if days_ahead == 0:
+                days_ahead = 7
+
+            result = base_date + timedelta(days=days_ahead)
+            return result.isoformat()
+
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return "Not specified"
 
 def analyze_meeting_once(
     transcript: str,
@@ -307,7 +342,7 @@ def analyze_meeting_once(
             {{
                 "task": "Task description",
                 "owner": "Person responsible or Not specified",
-                "deadline": "Deadline or Not specified",
+                "deadline": "Original deadline phrase from transcript or Not specified",
                 "status": "Pending"
             }}
         ]
@@ -322,15 +357,15 @@ Rules:
       recommendations or action items.
     - Keep the summary concise.
 
+
 DEADLINE RULES:
-    - The meeting date is: {meeting_date}
-    - Interpret relative deadlines using this meeting date.
-    - Convert "Friday", "next Monday", "tomorrow",
-      and similar expressions into actual calendar dates.
-    - Return every known deadline strictly as YYYY-MM-DD.
-    - For a deadline without enough information,
-      return "Not specified".
-    - Never guess or invent a deadline date.
+    - Meeting date: {meeting_date}
+    - Extract the original deadline phrase exactly as stated.
+    - Examples: "Friday", "next Monday", "tomorrow".
+    - Do NOT calculate or convert dates yourself.
+    - If no deadline is mentioned, return "Not specified".
+    - Never invent a deadline.
+
 
 
     Meeting transcript:
@@ -367,13 +402,10 @@ DEADLINE RULES:
             task_data.get("deadline", "Not specified")
         ).strip()
 
-        try:
-            if raw_deadline.lower() == "not specified":
-                deadline = "Not specified"
-            else:
-                deadline = date.fromisoformat(raw_deadline).isoformat()
-        except ValueError:
-            deadline = "Not specified"
+        deadline = calculate_deadline(
+            raw_deadline,
+            meeting_date
+        )
 
         tasks.append({
             "task": str(task_data.get("task", "")),
