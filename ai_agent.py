@@ -114,7 +114,7 @@ def generate_meeting_output(prompt: str) -> str:
     print("Trying local Gemma AI...")
 
     try:
-        response = ollama.chat(
+        response = ollama.chat(  # pyright: ignore[reportUnknownMemberType]
             model="gemma4:e2b",
             messages=[
                 {
