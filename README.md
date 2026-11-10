@@ -140,3 +140,109 @@ GitHub: [Chrn08s](https://github.com/Chrn08s)
 ---
 
 *Built to help student teams turn meetings into meaningful action.*
+
+## Hybrid AI Architecture
+
+This project uses a hybrid AI system to analyze meeting transcripts and extract actionable tasks.
+
+### AI Models
+
+**Primary Model: Google Gemma 4 E2B (Local)**
+- Runs locally using Ollama.
+- No Gemini API usage for successful local requests.
+- Extracts meeting summaries, decisions, recommendations, tasks, owners, and deadlines.
+
+**Fallback Model: Gemini 3.5 Flash-Lite**
+- Used when the local Gemma model fails.
+- Requires a valid Gemini API key.
+- Subject to Google AI API quotas and availability.
+
+### Architecture
+
+Telegram User
+    |
+    v
+Telegram Bot
+    |
+    v
+Local Gemma via Ollama
+    |
+    | If local AI fails
+    v
+Gemini API Fallback
+    |
+    v
+Meeting Analysis
+    |
+    v
+Google Sheets
+    |
+    v
+Telegram Report
+
+### Local AI Setup (macOS)
+
+1. Install Ollama:
+   https://ollama.com/download
+
+2. Download the model:
+
+   ```bash
+   ollama pull gemma4:e2b
+   ```
+
+3. Install the Python package:
+
+   ```bash
+   pip install ollama
+   ```
+
+4. Start Ollama and verify the model:
+
+   ```bash
+   ollama run gemma4:e2b
+   ```
+
+### Run the Telegram Bot
+
+Activate your Python virtual environment:
+
+```bash
+source .venv/bin/activate
+```
+
+Start the bot:
+
+```bash
+python bot.py
+```
+
+Keep Ollama running while the bot is active.
+
+### Hybrid AI Behaviour
+
+- Local Gemma is tried first.
+- Gemini is called if local processing fails.
+- If both models fail, the meeting is not saved as successfully processed.
+- Gemini fallback may be affected by API quotas, service availability, and network errors.
+
+### Important Requirements
+
+- Python 3.11
+- Ollama
+- Gemma 4 E2B model
+- Telegram Bot API credentials
+- Google Sheets API credentials
+- Gemini API key for fallback
+
+### Deployment Note
+
+The bot currently runs on the developer's MacBook.
+
+For continuous availability:
+- Keep the MacBook powered on.
+- Maintain an internet connection.
+- Keep Ollama running.
+- Keep the Telegram bot process running.
+
+Local AI processing requires the computer hosting Ollama to remain available.
