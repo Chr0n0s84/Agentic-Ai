@@ -86,9 +86,37 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for i in range(0, len(result), 4000):
             await message.reply_text(result[i:i + 4000])
 
+
     except Exception as e:
-        print("TASKS ERROR:", str(e))
-        await message.reply_text("❌ Could not retrieve tasks.")
+        import traceback
+
+        traceback.print_exc()
+
+        error_code = getattr(e, "code", None)
+
+        if error_code == 503:
+            user_message = (
+                "⏳ AI service is temporarily busy.\n\n"
+                "Your meeting could not be processed or saved.\n"
+                "Please try again in a few minutes."
+            )
+
+        elif error_code == 429:
+            user_message = (
+                "⚠️ AI request limit reached.\n\n"
+                "Please try again after your API quota resets."
+            )
+
+        else:
+            user_message = (
+                "❌ Something went wrong while processing "
+                "your meeting.\n\n"
+                "Your meeting could not be processed. "
+                "Please try again later."
+            )
+
+        await message.reply_text(user_message)
+
 
 
 async def show_filtered_tasks(update: Update, status: str) -> None:

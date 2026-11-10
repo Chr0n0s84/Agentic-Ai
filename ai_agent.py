@@ -3,10 +3,11 @@ import os
 from datetime import date
 from pathlib import Path
 from typing import Optional, Protocol, TypedDict, cast
-
+from google.genai import types
 from dotenv import load_dotenv
 from google import genai
 import time
+import ollama
 from google.genai import errors
 
 # Find .env in the same folder as this file
@@ -22,7 +23,10 @@ if not api_key:
         f"GEMINI_API_KEY missing. Check: {ENV_PATH}"
     )
 
-client = genai.Client(api_key=api_key)
+client = genai.Client(
+    api_key=api_key,
+    http_options=types.HttpOptions(timeout=20000)
+)
 
 
 
@@ -32,6 +36,14 @@ class _Response(Protocol):
 
 class _Models(Protocol):
     def generate_content(self, *, model: str, contents: str) -> _Response: ...
+
+
+class _OllamaMessage(Protocol):
+    content: Optional[str]
+
+
+class _OllamaResponse(Protocol):
+    message: Optional[_OllamaMessage]
 
 
 class ExtractedTask(TypedDict):
@@ -49,28 +61,100 @@ class ExtractedMeeting(TypedDict):
     tasks: list[ExtractedTask]
 
 
-def generate_with_retry(prompt: str) -> _Response:
-    models = cast(_Models, client.models)
 
-    for attempt in range(3):
+
+
+def generate_with_retry(prompt: str) -> _Response:
+    import random
+
+    models = cast(_Models, client.models)
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        start_time = time.perf_counter()
+
         try:
-            return models.generate_content(
+            print(
+                f"Gemini request started "
+                f"(attempt {attempt + 1}/{max_attempts})..."
+            )
+
+            response = models.generate_content(
                 model="gemini-3.8-flash",
                 contents=prompt
             )
+
+            elapsed = time.perf_counter() - start_time
+            print(
+                f"Gemini response received in "
+                f"{elapsed:.2f} seconds."
+            )
+
+            return response
+
         except errors.APIError as e:
-            if getattr(e, "code", None) == 503 and attempt < 2:
-                wait_time = 2 ** (attempt + 1)
+            elapsed = time.perf_counter() - start_time
+
+            if getattr(e, "code", None) == 503 and attempt < max_attempts - 1:
+                wait_time = 2 ** attempt
+                total_wait = wait_time + random.uniform(0, 0.5)
+
                 print(
-                    f"Gemini server busy. "
-                    f"Retrying in {wait_time} seconds..."
+                    f"Gemini 503 after {elapsed:.2f}s. "==
+                    f"Retrying in {total_wait:.1f}s..."
                 )
-                time.sleep(wait_time)
+                time.sleep(total_wait)
             else:
                 raise
 
     raise RuntimeError("Gemini request failed after retries")
 
+
+def generate_meeting_output(prompt: str) -> str:
+    print("Trying local Gemma AI...")
+
+    try:
+        response = ollama.chat(
+            model="gemma4:e2b",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            format="json",
+            options={
+                "temperature": 0
+            }
+        )
+
+        ollama_response = cast(_OllamaResponse, response)
+        message = ollama_response.message
+
+        if message is None or message.content is None:
+            raise ValueError("Local Gemma returned no content")
+
+        result = message.content.strip()
+
+        if not result:
+            raise ValueError("Local Gemma returned empty output")
+
+        print("Local Gemma succeeded!")
+        return result
+
+    except Exception as local_error:
+        print(f"Local Gemma failed: {local_error}")
+        print("Switching to Gemini backup...")
+
+    response = generate_with_retry(prompt)
+
+    result = (response.text or "").strip()
+
+    if not result:
+        raise ValueError("Gemini returned empty output")
+
+    print("Gemini backup succeeded!")
+    return result
 
 
 def analyze_meeting(transcript: str) -> str:
@@ -253,8 +337,7 @@ DEADLINE RULES:
     {transcript}
     """
 
-    response = generate_with_retry(prompt)
-    raw_text = (response.text or "").strip()
+    raw_text = generate_meeting_output(prompt)
 
     if raw_text.startswith("```"):
         raw_text = raw_text.split("\n", 1)[-1]
